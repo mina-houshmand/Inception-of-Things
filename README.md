@@ -8,6 +8,7 @@ A plain-language guide to the project: what to build, in what order, and how to 
 
 | Word | What it means |
 |---|---|
+| **VM (Virtual Machine)** | A computer running inside your computer. |
 | **Vagrant** | A tool that creates VMs from a text file called a `Vagrantfile`, so you don't click through VirtualBox by hand. |
 | **Provider** | The program Vagrant uses to actually run the VMs (usually **VirtualBox**). |
 | **Kubernetes (K8s)** | A system that runs and manages apps packaged as containers. |
@@ -25,6 +26,62 @@ A plain-language guide to the project: what to build, in what order, and how to 
 
 ---
 
+## The big idea: how many VMs, and why
+
+The **host VM** is your "big box," and it stays the same for the whole project. Everything happens inside it.
+
+```
+Your computer
+└── Host VM  (you create it yourself; the whole project lives here)
+    ├── Part 1: wilS + wilSW   (2 VMs side by side, made by Vagrant)
+    ├── Part 2: wilS           (1 VM, made by Vagrant)
+    └── Part 3: K3d cluster    (no VMs, just Docker containers)
+```
+
+### Part 1: 2 VMs (wilS and wilSW)
+
+The idea: learn how a Kubernetes cluster is made of **several machines working together**.
+
+- **wilS** is the boss (K3s *server*). It decides what runs where.
+- **wilSW** is the worker (K3s *agent*). It does the work the boss gives it.
+- You connect them so they form **one cluster**. When you run `kubectl get nodes`, you see both.
+
+There are no apps yet. You're just building the team.
+
+Think of it as a manager and an employee who have just been hired and introduced to each other.
+
+### Part 2: 1 VM (wilS)
+
+The idea: learn how to **run apps** in Kubernetes and **route visitors** to the right one.
+
+- One machine is enough here, since it's both the boss and the worker.
+- You run 3 small websites (app1, app2, app3) on it.
+- app2 runs as 3 copies, which shows that Kubernetes can run several copies of an app so it keeps working if one breaks.
+- An **Ingress** acts like a receptionist. It reads which name the visitor asked for and sends them to the right app:
+  - `app1.com` goes to app1
+  - `app2.com` goes to app2
+  - anything else goes to app3
+
+Think of it as one building with 3 shops and a receptionist at the door pointing people to the right shop.
+
+### Part 3: 0 extra VMs (just Docker on the host VM)
+
+The idea: learn a **faster way** to make a cluster, and **automatic updates from Git**.
+
+- No Vagrant this time. **K3d** builds the cluster out of Docker containers instead of VMs, which is much quicker and lighter.
+- You install **Argo CD**, which keeps watching your GitHub repo.
+- When you change `v1` to `v2` in GitHub and push, Argo CD notices and updates the app by itself. You never touch the cluster directly.
+
+Think of it as a robot that reads your instructions on GitHub. When you change them, the robot changes the app to match.
+
+### Bonus
+
+The same as Part 3, but you run your own **GitLab** inside the cluster instead of using GitHub.
+
+> The lesson across the three parts: Part 1 is how a cluster is built, Part 2 is how apps run in it, and Part 3 is how to update them automatically.
+
+---
+
 ## 1. Before you start (do this together)
 
 1. **Create the host VM.** The whole project must run inside a VM.
@@ -33,17 +90,61 @@ A plain-language guide to the project: what to build, in what order, and how to 
 2. **Install the tools** inside the host VM: `git`, `vagrant`, `virtualbox`, `curl`.
 3. **Pick a distro** for the Vagrant VMs, e.g. the latest stable Debian, and use the same box everywhere.
 4. **Pick a login** to use in names. The examples below use `wil`, so replace it with yours.
-5. **Create the repo** with this layout:
+5. **Create the repo** with this layout.
+
+> Rule: scripts go in `scripts/`, config files (YAML etc.) go in `confs/`.
+
+---
+
+## Project structure
 
 ```
 .
-├── p1/      Vagrantfile, scripts/, confs/
-├── p2/      Vagrantfile, scripts/, confs/
-├── p3/      scripts/, confs/
-└── bonus/   (optional) Vagrantfile, scripts/, confs/
+├── README.md                     this guide
+├── .gitignore                    keeps .vagrant/ and the K3s token out of Git
+│
+├── p1/                           Part 1: K3s + Vagrant (2 VMs)
+│   ├── Vagrantfile               defines wilS (192.168.56.110) and wilSW (192.168.56.111)
+│   ├── scripts/
+│   │   ├── server.sh             installs K3s server, shares the join token
+│   │   └── worker.sh             waits for the token, installs K3s agent, joins
+│   └── confs/                    node-token is written here at runtime
+│
+├── p2/                           Part 2: K3s + 3 web apps (1 VM)
+│   ├── Vagrantfile               defines wilS (192.168.56.110)
+│   ├── scripts/
+│   │   └── server.sh             installs K3s server, applies everything in confs/
+│   └── confs/
+│       ├── apps.yaml             3 Deployments + 3 Services (app2 has 3 replicas)
+│       └── ingress.yaml          app1.com → app1, app2.com → app2, default → app3
+│
+├── p3/                           Part 3: K3d + Argo CD (no Vagrant)
+│   ├── scripts/
+│   │   ├── install.sh            installs Docker, kubectl, k3d
+│   │   └── setup.sh              creates cluster, namespaces argocd + dev, installs Argo CD
+│   └── confs/
+│       ├── application.yaml      tells Argo CD which GitHub repo to watch
+│       └── app-repo/             copy these into your separate public GitHub repo
+│           ├── deployment.yaml   wil42/playground:v1 (change to v2 in the demo)
+│           └── service.yaml      exposes port 8888
+│
+└── bonus/                        GitLab (optional, empty for now)
+    ├── scripts/
+    └── confs/
 ```
 
-> Rule: scripts go in `scripts/`, config files (YAML etc.) go in `confs/`.
+**Before running anything, change:**
+- `LOGIN = "wil"` in `p1/Vagrantfile` and `p2/Vagrantfile` to your team login
+- `BOX` in both Vagrantfiles, if `bento/debian-13` doesn't exist
+- `repoURL` in `p3/confs/application.yaml` to your public GitHub app repo
+
+**How to run each part:**
+
+| Part | Command |
+|---|---|
+| p1 | `cd p1 && vagrant up` |
+| p2 | `cd p2 && vagrant up` |
+| p3 | `cd p3 && sudo bash scripts/install.sh`, log out and back in, then `bash scripts/setup.sh` |
 
 ---
 

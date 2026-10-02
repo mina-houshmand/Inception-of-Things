@@ -1,0 +1,20 @@
+# Tells Argo CD: watch this GitHub repo and deploy what's in it into "dev".
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: wil-playground
+  namespace: argocd
+spec:
+  project: default
+  source:
+    # TODO: replace with your public repo (must contain a team login in its name)
+    repoURL: https://github.com/YOUR_USER/wil-iot-app.git
+    targetRevision: HEAD
+    path: .
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
